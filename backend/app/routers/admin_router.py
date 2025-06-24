@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from typing import Optional, List
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
-from .. import models, schemas, auth
+from .. import models, schemas, auth, drive_utils, config
+from ..drive_utils import delete_file_from_drive
 from datetime import timedelta, datetime
 from pytz import timezone
 from io import BytesIO
+import re
 import pytz
 import pandas as pd
 
@@ -19,20 +22,39 @@ def format_timedelta(duration: timedelta) -> str:
     return f"lewat {hours} jam {minutes} menit"
 
 @router.post("/orders", response_model=schemas.OrderOut)
-def create_order(order: schemas.OrderCreate, db: Session = Depends(auth.get_db), user=Depends(auth.get_current_user)):
+async def create_order(
+    title: str = Form(...),
+    description: str = Form(...),
+    user_id: int = Form(...),
+    tid: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(auth.get_db),
+    user=Depends(auth.get_current_user)
+):
     if user.role != "admin":
         raise HTTPException(403, detail="Admin only")
-    
-    ref = db.query(models.ReferenceData).filter(models.ReferenceData.tid == order.tid).first()
-    
+
+    ref = db.query(models.ReferenceData).filter(models.ReferenceData.tid == tid).first()
+
     if not ref:
-        raise HTTPException(404, detail=f"TID {order.tid} not found in reference data")
-    
+        raise HTTPException(404, detail=f"TID {tid} not found in reference data")
+
+    file_url = None
+    if file:
+        file_data = await file.read()
+        file_url = drive_utils.upload_file_to_drive(
+            filename=file.filename,
+            file_data=file_data,
+            mimetype=file.content_type,
+            folder_id=config.GOOGLE_DRIVE_FOLDER_ID_CREATE
+        )
+
     new_order = models.Order(
-        title=order.title,
-        description=order.description,
-        user_id=order.user_id,
-        reference_id=ref.id
+        title=title,
+        description=description,
+        user_id=user_id,
+        reference_id=ref.id,
+        image_url_new=file_url 
     )
     db.add(new_order)
     db.commit()
@@ -60,17 +82,6 @@ def get_all_orders(db: Session = Depends(auth.get_db), user=Depends(auth.get_cur
             "lokasi": o.reference_data.lokasi,
         } if o.reference_data else None
 
-        # Update overdue state if needed (only if not completed)
-        if not o.completed_at and o.state != models.OrderState.overdue:
-            deadline = o.created_at + overdue_limit
-            if o.created_at.tzinfo is None:
-                deadline = WIB.localize(o.created_at) + overdue_limit
-            if now_wib > deadline:
-                o.state = models.OrderState.overdue
-                db.add(o)
-                db.commit()
-                db.refresh(o)
-
         if o.completed_at:
             time_to_complete = o.completed_at - o.created_at
             if time_to_complete > overdue_limit:
@@ -85,6 +96,7 @@ def get_all_orders(db: Session = Depends(auth.get_db), user=Depends(auth.get_cur
             "created_at": o.created_at,
             "completed_at": o.completed_at,
             "image_url": o.image_url,
+            "image_url_new": o.image_url_new,
             "user_id": o.user_id,
             "username": username,
             "overdue_duration": overdue_duration,
@@ -108,16 +120,61 @@ def list_reference(db: Session = Depends(auth.get_db), user=Depends(auth.get_cur
         raise HTTPException(403, detail="Admin only")
     return db.query(models.ReferenceData).all()
 
-@router.delete("/orders/{order_id}")
-def delete_order(order_id: int, db: Session = Depends(auth.get_db), user=Depends(auth.get_current_user)):
+
+@router.delete("/orders/batch-delete")
+def batch_delete_orders(
+    order_ids: List[int],
+    db: Session = Depends(auth.get_db),
+    user=Depends(auth.get_current_user)
+):
     if user.role != "admin":
         raise HTTPException(403, detail="Admin only")
+
+    # Fetch orders to get their image URLs before deletion
+    orders = db.query(models.Order).filter(models.Order.id.in_(order_ids)).all()
+
+    for order in orders:
+        for url in [order.image_url, order.image_url_new]:
+            if url:
+                match = re.search(r"id=([^&]+)", url)
+                if match:
+                    file_id = match.group(1)
+                    try:
+                        delete_file_from_drive(file_id)
+                    except Exception as e:
+                        raise HTTPException(500, detail=f"Failed to delete image from Google Drive: {e}")
+
+    deleted_count = db.query(models.Order).filter(models.Order.id.in_(order_ids)).delete(synchronize_session=False)
+    db.commit()
+    return {"detail": f"{deleted_count} orders and their images deleted successfully"}
+
+@router.delete("/orders/{order_id}")
+def delete_order(
+    order_id: int,
+    db: Session = Depends(auth.get_db),
+    user=Depends(auth.get_current_user)
+):
+    if user.role != "admin":
+        raise HTTPException(403, detail="Admin only")
+
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
         raise HTTPException(404, detail="Order not found")
+
+
+    for url in [order.image_url, order.image_url_new]:
+        if url:
+            match = re.search(r"id=([^&]+)", url)
+            if match:
+                file_id = match.group(1)
+                try:
+                    delete_file_from_drive(file_id)
+                except Exception as e:
+                    raise HTTPException(500, detail=f"Failed to delete image from Google Drive: {e}")
+
     db.delete(order)
     db.commit()
-    return {"detail": "Order deleted"}
+    return {"detail": "Order and associated images deleted successfully"}
 
 @router.post("/orders/bulk-upload")
 def bulk_create_orders(file: UploadFile = File(...), db: Session = Depends(auth.get_db), user=Depends(auth.get_current_user)):
@@ -130,7 +187,7 @@ def bulk_create_orders(file: UploadFile = File(...), db: Session = Depends(auth.
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error reading Excel file: {e}")
 
-    required_columns = {"TID", "Pengelola", "Status", "Est. Tgl. Problem"}
+    required_columns = {"TID", "Pengelola", "Problem", "Est. Tgl. Problem"}
     if not required_columns.issubset(df.columns):
         raise HTTPException(status_code=400, detail=f"Missing columns. Required: {required_columns}")
 
@@ -140,7 +197,7 @@ def bulk_create_orders(file: UploadFile = File(...), db: Session = Depends(auth.
     for _, row in df.iterrows():
         tid = str(row["TID"]).strip()
         pengelola = str(row["Pengelola"]).replace(" ", "").upper()  # normalize
-        title = str(row["Status"]).strip()
+        title = str(row["Problem"]).strip()
         created_at = row["Est. Tgl. Problem"]
 
         if isinstance(created_at, str):

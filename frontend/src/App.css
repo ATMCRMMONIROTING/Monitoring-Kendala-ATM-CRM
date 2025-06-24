@@ -306,9 +306,15 @@ td {
 }
 
 td.date-cell {
-  max-width: 150px; /* or any value you prefer */
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 80px;
+}
+
+td.sla-cell {
+  white-space: normal;
+  min-width: 110px;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 
 tr:hover {
@@ -393,8 +399,8 @@ tr.overdue:hover {
 }
 
 .status-completed_but_overdue {
-  background: rgba(220, 38, 38, 0.1); 
-  color: var(--danger); 
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--danger);
 }
 
 /* Login Form */

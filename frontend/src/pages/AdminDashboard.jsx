@@ -14,16 +14,30 @@ export default function AdminDashboard() {
   const [uploading, setUploading] = useState(false)
   const [selectedTidData, setSelectedTidData] = useState(null)
 
+  // Add state for batch delete
+  const [selectedOrders, setSelectedOrders] = useState(new Set())
+  const [isDeleting, setIsDeleting] = useState(false)
+
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [sortBy, setSortBy] = useState("newest")
   const [dateFilter, setDateFilter] = useState("all")
 
-  const currentYear = new Date().getFullYear();
+  const currentYear = new Date().getFullYear()
   const monthNames = [
-    "Januari", "Februari", "Maret", "April", "Mei", "Juni",
-    "Juli", "Agustus", "September", "Oktober", "November", "Desember"
-  ];
+    "Januari",
+    "Februari",
+    "Maret",
+    "April",
+    "Mei",
+    "Juni",
+    "Juli",
+    "Agustus",
+    "September",
+    "Oktober",
+    "November",
+    "Desember",
+  ]
 
   // Pagination state for frequent TIDs
   const [tidCurrentPage, setTidCurrentPage] = useState(1)
@@ -34,10 +48,87 @@ export default function AdminDashboard() {
   const [ordersCurrentPage, setOrdersCurrentPage] = useState(1)
   const ordersPerPage = 10
 
+  // Helper function to normalize state values - more aggressive version
+  const normalizeState = (state) => {
+    if (!state) return ""
+    if (typeof state !== "string") return ""
+
+    // Convert to lowercase and trim whitespace
+    const normalized = state.toLowerCase().trim()
+
+    // Special handling for completed_but_overdue with various formats
+    if (
+      normalized === "completed_but_overdue" ||
+      normalized === "completed but overdue" ||
+      normalized === "completedbutoverdue" ||
+      normalized === "completed-but-overdue" ||
+      normalized === "completed_butoverdue" ||
+      normalized === "completed_but_overdue " || // trailing space
+      normalized === " completed_but_overdue" || // leading space
+      (normalized.includes("completed") && normalized.includes("overdue"))
+    ) {
+      console.log(`Normalized state "${state}" to "completed_but_overdue"`)
+      return "completed_but_overdue"
+    }
+
+    return normalized
+  }
+
+  // Helper function to check if an order is completed but overdue - more aggressive version
+  const isCompletedButOverdue = (order) => {
+    if (!order) return false
+
+    // Check the normalized state
+    const state = normalizeState(order.state)
+    if (state === "completed_but_overdue") return true
+
+    // Additional checks for completed_but_overdue
+    if (order.state && typeof order.state === "object") {
+      console.log("Found state as object:", order.state)
+      // Try to extract state from object if possible
+      if (order.state.status && typeof order.state.status === "string") {
+        return normalizeState(order.state.status) === "completed_but_overdue"
+      }
+    }
+
+    // Check if there are other properties that might indicate completed_but_overdue
+    if (order.completed_at && order.overdue) {
+      console.log("Detected completed_but_overdue from properties: completed_at exists and overdue=true")
+      return true
+    }
+
+    return false
+  }
+
+  // Helper function to check if an order is overdue
+  const isOverdue = (order) => {
+    const state = normalizeState(order.state)
+    return state === "overdue"
+  }
+
+  // Helper function to check if an order is either overdue or completed_but_overdue
+  const isAnyOverdue = (order) => {
+    return isOverdue(order) || isCompletedButOverdue(order)
+  }
+
+  // Function to extract all completed_but_overdue orders
+  const getCompletedButOverdueOrders = () => {
+    const completedButOverdueOrders = orders.filter((order) => {
+      const isOverdue = isCompletedButOverdue(order)
+      if (isOverdue && order.reference_data?.tid) {
+        console.log(`Found completed_but_overdue order with TID ${order.reference_data.tid}:`, order)
+        return true
+      }
+      return false
+    })
+
+    console.log(`Found ${completedButOverdueOrders.length} completed_but_overdue orders with TIDs`)
+    return completedButOverdueOrders
+  }
+
   const exportToExcel = () => {
     // Map the filteredOrders to a flat array of objects for Excel export
     const exportData = orders.map((order) => ({
-      ID: order.id,
       TID: order.reference_data?.tid || "—",
       Lokasi: order.reference_data?.lokasi || "—",
       KC_Supervisi: order.reference_data?.kc_supervisi || "—",
@@ -46,6 +137,7 @@ export default function AdminDashboard() {
       Deskripsi: order.description,
       Status: translateStatus(order.state),
       Dibuat: new Date(order.created_at).toLocaleString(),
+      Foto_Informasi: order.image_url_new ? order.image_url_new : "Kosong",
       Hasil_Submit: order.image_url ? order.image_url : "Kosong",
       Diselesaikan: order.completed_at ? new Date(order.completed_at).toLocaleString() : "—",
       Deadline: (() => {
@@ -54,7 +146,7 @@ export default function AdminDashboard() {
           const createdAt = new Date(order.created_at)
           const deadline = new Date(createdAt.getTime() + 2 * 60 * 60 * 1000)
           const completedAt = new Date(order.completed_at)
-          return completedAt <= deadline ? "Sesuai deadline" : "Melewati deadline"
+          return completedAt <= deadline ? "Sesuai SLA" : "Melewati SLA"
         } else if (order.state === "pending" || order.state === "overdue") {
           const createdAt = new Date(order.created_at)
           const deadline = new Date(createdAt.getTime() + 2 * 60 * 60 * 1000)
@@ -87,44 +179,78 @@ export default function AdminDashboard() {
     saveAs(new Blob([wbout], { type: "application/octet-stream" }), "kendala_export.xlsx")
   }
 
-  // Function to find TIDs that appear more than 2 times in a single month
+  // Completely rewritten getFrequentTids function
   const getFrequentTids = () => {
-    const monthlyTidCounts = {}
+    // First, filter out orders without TIDs and those that aren't overdue or completed_but_overdue
+    const relevantOrders = orders.filter((order) => {
+      return order.reference_data?.tid && isAnyOverdue(order)
+    })
 
-    orders.forEach((order) => {
-      if (!order.reference_data?.tid) return
+    console.log(`Found ${relevantOrders.length} relevant orders for TID analysis`)
 
+    // Group orders by month and TID
+    const groupedOrders = {}
+
+    relevantOrders.forEach((order) => {
       const orderDate = new Date(order.created_at)
       const monthKey = `${orderDate.getFullYear()}-${orderDate.getMonth()}`
       const tid = order.reference_data.tid
 
-      if (!monthlyTidCounts[monthKey]) {
-        monthlyTidCounts[monthKey] = {}
+      // Initialize month if needed
+      if (!groupedOrders[monthKey]) {
+        groupedOrders[monthKey] = {}
       }
 
-      if (!monthlyTidCounts[monthKey][tid]) {
-        monthlyTidCounts[monthKey][tid] = []
+      // Initialize TID if needed
+      if (!groupedOrders[monthKey][tid]) {
+        groupedOrders[monthKey][tid] = {
+          orders: [],
+          overdue: 0,
+          completed_but_overdue: 0,
+        }
       }
 
-      monthlyTidCounts[monthKey][tid].push(order)
+      // Add order to the appropriate group
+      groupedOrders[monthKey][tid].orders.push(order)
+
+      // Increment the appropriate counter
+      if (isOverdue(order)) {
+        groupedOrders[monthKey][tid].overdue++
+      } else if (isCompletedButOverdue(order)) {
+        groupedOrders[monthKey][tid].completed_but_overdue++
+      }
     })
 
+    // Convert grouped data to array format
     const frequentTids = []
-    Object.entries(monthlyTidCounts).forEach(([monthKey, tidCounts]) => {
-      Object.entries(tidCounts).forEach(([tid, orderList]) => {
-        if (orderList.length > 2) {
+
+    Object.entries(groupedOrders).forEach(([monthKey, tidGroups]) => {
+      Object.entries(tidGroups).forEach(([tid, data]) => {
+        const totalCount = data.overdue + data.completed_but_overdue
+
+        // Only include TIDs with more than 2 occurrences
+        if (totalCount > 2) {
           const [year, month] = monthKey.split("-")
           const monthName = new Date(Number.parseInt(year), Number.parseInt(month)).toLocaleDateString("id-ID", {
             month: "long",
             year: "numeric",
           })
+
           frequentTids.push({
             tid,
-            count: orderList.length,
+            count: totalCount,
             monthKey,
             monthName,
-            orders: orderList,
+            orders: data.orders,
+            stateBreakdown: {
+              overdue: data.overdue,
+              completed_but_overdue: data.completed_but_overdue,
+            },
           })
+
+          console.log(
+            `TID ${tid} in ${monthName}: overdue=${data.overdue}, completed_but_overdue=${data.completed_but_overdue}, total=${totalCount}`,
+          )
         }
       })
     })
@@ -132,22 +258,59 @@ export default function AdminDashboard() {
     return frequentTids.sort((a, b) => b.count - a.count)
   }
 
-  // Function to generate daily data for line chart
+  // Completely rewritten generateDailyData function
   const generateDailyData = (orders, monthKey) => {
-    const [year, month] = monthKey.split("-")
-    const daysInMonth = new Date(Number.parseInt(year), Number.parseInt(month) + 1, 0).getDate()
-    const dailyCounts = Array(daysInMonth).fill(0)
+    console.log(`Generating daily data for ${monthKey} with ${orders.length} orders`)
 
-    orders.forEach((order) => {
-      const orderDate = new Date(order.created_at)
-      const day = orderDate.getDate() - 1 // 0-indexed
-      dailyCounts[day]++
+    // Split the month key to get year and month
+    const [year, month] = monthKey.split("-")
+    const yearNum = Number.parseInt(year)
+    const monthNum = Number.parseInt(month)
+
+    // Calculate days in month
+    const daysInMonth = new Date(yearNum, monthNum + 1, 0).getDate()
+
+    // Initialize daily counts for both types of orders
+    const dailyOverdue = Array(daysInMonth).fill(0)
+    const dailyCompletedButOverdue = Array(daysInMonth).fill(0)
+
+    // Count orders by day
+    orders.forEach((order, index) => {
+      try {
+        const orderDate = new Date(order.created_at)
+        const orderDay = orderDate.getDate() - 1 // 0-indexed
+
+        // Make sure the day is valid
+        if (orderDay >= 0 && orderDay < daysInMonth) {
+          if (isOverdue(order)) {
+            dailyOverdue[orderDay]++
+            console.log(`Order ${index} (${order.state}) counted as overdue on day ${orderDay + 1}`)
+          } else if (isCompletedButOverdue(order)) {
+            dailyCompletedButOverdue[orderDay]++
+            console.log(`Order ${index} (${order.state}) counted as completed_but_overdue on day ${orderDay + 1}`)
+          } else {
+            console.log(`Order ${index} (${order.state}) not counted - not overdue or completed_but_overdue`)
+          }
+        } else {
+          console.error(`Invalid day calculated: ${orderDay} for date ${orderDate}`)
+        }
+      } catch (error) {
+        console.error(`Error processing order ${index}:`, error)
+      }
     })
 
-    return dailyCounts.map((count, index) => ({
-      day: index + 1,
-      count,
-    }))
+    // Combine the counts
+    const dailyData = Array(daysInMonth)
+      .fill(0)
+      .map((_, index) => ({
+        day: index + 1,
+        count: dailyOverdue[index] + dailyCompletedButOverdue[index],
+        overdue: dailyOverdue[index],
+        completed_but_overdue: dailyCompletedButOverdue[index],
+      }))
+
+    console.log("Generated daily data:", dailyData)
+    return dailyData
   }
 
   // Function to get TID information from orders
@@ -165,8 +328,17 @@ export default function AdminDashboard() {
     }
   }
 
-  // Replace the LineChart component with this improved version
+  // Completely rewritten LineChart component
   const LineChart = ({ data, tid, monthName, orders }) => {
+    console.log("LineChart rendering with data:", data)
+    console.log("LineChart orders:", orders)
+
+    // Count orders by state
+    const overdueCount = orders.filter((o) => isOverdue(o)).length
+    const completedButOverdueCount = orders.filter((o) => isCompletedButOverdue(o)).length
+
+    console.log(`Chart orders breakdown: overdue=${overdueCount}, completed_but_overdue=${completedButOverdueCount}`)
+
     const maxCount = Math.max(...data.map((d) => d.count), 1)
     const chartWidth = 600
     const chartHeight = 250
@@ -227,6 +399,47 @@ export default function AdminDashboard() {
             </div>
           )}
         </div>
+
+        {/* Add a breakdown of the orders by state */}
+        <div
+          style={{
+            marginBottom: "1rem",
+            padding: "0.75rem",
+            backgroundColor: "var(--bg-tertiary)",
+            borderRadius: "6px",
+          }}
+        >
+          <h5 style={{ marginBottom: "0.5rem", fontSize: "0.9rem" }}>Rincian Status Kendala:</h5>
+          <div style={{ display: "flex", gap: "1rem" }}>
+            <div>
+              <span
+                style={{
+                  display: "inline-block",
+                  width: "12px",
+                  height: "12px",
+                  backgroundColor: "var(--danger)",
+                  borderRadius: "50%",
+                  marginRight: "6px",
+                }}
+              ></span>
+              <span>Melewati SLA: {overdueCount}</span>
+            </div>
+            <div>
+              <span
+                style={{
+                  display: "inline-block",
+                  width: "12px",
+                  height: "12px",
+                  backgroundColor: "var(--warning)",
+                  borderRadius: "50%",
+                  marginRight: "6px",
+                }}
+              ></span>
+              <span>Selesai Terlambat: {completedButOverdueCount}</span>
+            </div>
+          </div>
+        </div>
+
         <div style={{ overflowX: "auto" }}>
           <svg width={chartWidth} height={chartHeight}>
             {/* Background grid */}
@@ -369,7 +582,10 @@ export default function AdminDashboard() {
         order.description.toLowerCase().includes(search.toLowerCase()) ||
         (order.reference_data?.tid || "").toLowerCase().includes(search.toLowerCase()) ||
         (order.reference_data?.lokasi || "").toLowerCase().includes(search.toLowerCase()) ||
-        (order.reference_data?.pengelola || "").toLowerCase().replace(/\s+/g, "").includes(search.toLowerCase().replace(/\s+/g, ""))
+        (order.reference_data?.pengelola || "")
+          .toLowerCase()
+          .replace(/\s+/g, "")
+          .includes(search.toLowerCase().replace(/\s+/g, ""))
 
       // Status filter
       const matchStatus = statusFilter === "all" || order.state === statusFilter
@@ -380,7 +596,7 @@ export default function AdminDashboard() {
         const orderDate = new Date(order.created_at)
         const orderYear = orderDate.getFullYear()
         const orderMonth = orderDate.getMonth() // 0-11
-        const currentYear = new Date().getFullYear();
+        const currentYear = new Date().getFullYear()
 
         // Only show orders from this year
         if (orderYear === currentYear) {
@@ -406,7 +622,7 @@ export default function AdminDashboard() {
         case "deadline":
           // Sort by time remaining (pending/overdue first, then by urgency)
           const getDeadlinePriority = (order) => {
-            if (order.state === "completed" || order.state === "completed but overdue") return 3
+            if (order.state === "completed" || order.state === "completed_but_overdue") return 3
             const created = new Date(order.created_at)
             const deadline = new Date(created.getTime() + 2 * 60 * 60 * 1000)
             const now = new Date()
@@ -436,13 +652,13 @@ export default function AdminDashboard() {
   const currentPageOrders = filteredOrders.slice(ordersStartIndex, ordersEndIndex)
 
   const translateStatus = (state) => {
-    switch (state.toLowerCase().replace(/\s+/g, "_")) {
+    switch (normalizeState(state)) {
       case "pending":
         return "Proses"
       case "completed":
         return "Selesai"
       case "overdue":
-        return "Melewati Deadline"
+        return "Melewati SLA"
       case "completed_but_overdue":
         return "Selesai Terlambat"
       default:
@@ -453,12 +669,125 @@ export default function AdminDashboard() {
   const fetchOrders = async () => {
     try {
       const res = await axios.get("/admin/orders")
+
+      // Log the raw response to see what we're getting
+      console.log("Raw orders response:", res.data)
+
+      // Check for completed_but_overdue orders in the raw data
+      const completedButOverdueCount = res.data.filter(
+        (order) => normalizeState(order.state) === "completed_but_overdue",
+      ).length
+
+      console.log(`Found ${completedButOverdueCount} completed_but_overdue orders in raw API response`)
+
       setOrders(res.data)
     } catch (err) {
       if (err.response?.status === 401) logout()
       else alert("Failed to fetch orders")
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Debug function to check raw state values
+  const debugRawStateValues = () => {
+    console.log("=== DEBUGGING RAW STATE VALUES ===")
+    const stateValues = new Set()
+    orders.forEach((order) => {
+      if (order.state) {
+        stateValues.add(String(order.state))
+      }
+    })
+
+    console.log("Unique state values found:", Array.from(stateValues))
+    console.log("=== END DEBUGGING RAW STATE VALUES ===")
+  }
+
+  // Add a debug log to help identify any issues with state values
+  const debugOrderStates = () => {
+    console.log("Debugging order states:")
+    const stateCount = {}
+    orders.forEach((order) => {
+      const state = normalizeState(order.state)
+      stateCount[state] = (stateCount[state] || 0) + 1
+    })
+    console.log("State counts:", stateCount)
+
+    // Log orders with completed_but_overdue state
+    const completedButOverdueOrders = orders.filter((o) => normalizeState(o.state) === "completed_but_overdue")
+    console.log(`Found ${completedButOverdueOrders.length} completed_but_overdue orders`)
+
+    if (completedButOverdueOrders.length > 0) {
+      console.log("Sample completed_but_overdue order:", completedButOverdueOrders[0])
+    }
+  }
+
+  // Batch delete function
+  const handleBatchDelete = async () => {
+    if (selectedOrders.size === 0) {
+      alert("Pilih minimal satu kendala untuk dihapus")
+      return
+    }
+
+    const orderIds = Array.from(selectedOrders)
+    const confirmMessage = `Apa anda yakin untuk menghapus ${orderIds.length} kendala yang dipilih? Tindakan ini tidak dapat dibatalkan.`
+
+    if (!confirm(confirmMessage)) return
+
+    setIsDeleting(true)
+    try {
+      // Send the request with the correct format for FastAPI
+      const response = await axios.delete("/admin/orders/batch-delete", {
+        data: orderIds, // Send the array directly, not wrapped in an object
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
+      // Remove deleted orders from state
+      setOrders((prev) => prev.filter((order) => !selectedOrders.has(order.id)))
+      setSelectedOrders(new Set())
+
+      alert(`${orderIds.length} kendala berhasil dihapus`)
+    } catch (err) {
+      console.error("Batch delete error:", err)
+      console.error("Error response:", err.response?.data)
+
+      // More detailed error handling
+      if (err.response?.status === 422) {
+        alert("Format data tidak valid. Silakan coba lagi.")
+      } else if (err.response?.status === 403) {
+        alert("Anda tidak memiliki izin untuk menghapus kendala.")
+      } else if (err.response?.status === 500) {
+        alert("Terjadi kesalahan server. Beberapa file mungkin tidak dapat dihapus dari Google Drive.")
+      } else {
+        alert("Gagal menghapus kendala: " + (err.response?.data?.detail || err.message))
+      }
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  // Handle individual checkbox change
+  const handleOrderSelect = (orderId) => {
+    const newSelected = new Set(selectedOrders)
+    if (newSelected.has(orderId)) {
+      newSelected.delete(orderId)
+    } else {
+      newSelected.add(orderId)
+    }
+    setSelectedOrders(newSelected)
+  }
+
+  // Handle select all checkbox
+  const handleSelectAll = () => {
+    if (selectedOrders.size === currentPageOrders.length) {
+      // If all current page orders are selected, deselect all
+      setSelectedOrders(new Set())
+    } else {
+      // Select all current page orders
+      const newSelected = new Set(currentPageOrders.map((order) => order.id))
+      setSelectedOrders(newSelected)
     }
   }
 
@@ -494,18 +823,35 @@ export default function AdminDashboard() {
     }
   }
 
+  // Call this function after orders are fetched
   useEffect(() => {
     fetchOrders()
   }, [])
 
-  const isCompletedButOverdue = (state) => state === "completed but overdue"
+  // Add another useEffect to debug when orders are updated
+  useEffect(() => {
+    if (orders.length > 0) {
+      console.log("Orders updated, current count:", orders.length)
+      debugOrderStates()
+      debugRawStateValues() // Add this line
+
+      // Check if we have any completed_but_overdue orders
+      const completedButOverdueOrders = orders.filter((o) => isCompletedButOverdue(o))
+      if (completedButOverdueOrders.length > 0) {
+        console.log(`Found ${completedButOverdueOrders.length} completed_but_overdue orders in state`)
+        console.log("Sample completed_but_overdue order:", completedButOverdueOrders[0])
+      } else {
+        console.warn("No completed_but_overdue orders found in state!")
+      }
+    }
+  }, [orders])
 
   const getStats = () => {
     const total = orders.length
-    const pending = orders.filter((o) => o.state === "pending").length
-    const completed = orders.filter((o) => o.state === "completed").length
-    const overdue = orders.filter((o) => o.state === "overdue").length
-    const completed_but_overdue = orders.filter((o) => o.state === "completed but overdue").length
+    const pending = orders.filter((o) => normalizeState(o.state) === "pending").length
+    const completed = orders.filter((o) => normalizeState(o.state) === "completed").length
+    const overdue = orders.filter((o) => normalizeState(o.state) === "overdue").length
+    const completed_but_overdue = orders.filter((o) => normalizeState(o.state) === "completed_but_overdue").length
     return { total, pending, completed, overdue, completed_but_overdue }
   }
 
@@ -805,17 +1151,17 @@ export default function AdminDashboard() {
         </div>
         <div className="stat-card">
           <div className="stat-value">{stats.overdue}</div>
-          <div className="stat-label">Kendala Dalam Proses Tapi Melewati Deadline</div>
+          <div className="stat-label">Kendala Dalam Proses Tapi Melewati SLA Penanganan Kendala.</div>
         </div>
         <div className="stat-card">
           <div className="stat-value">{stats.completed_but_overdue}</div>
-          <div className="stat-label">Kendala Sudah Selesai Tapi Melewati Deadline</div>
+          <div className="stat-label">Kendala Sudah Selesai Tapi Melewati SLA Penanganan Kendala.</div>
         </div>
       </div>
 
       {/* Frequent TIDs Analysis */}
       <div className="card" style={{ marginBottom: "1rem" }}>
-        <h3>TID dengan Kendala Berulang (&gt;2 kali dalam 1 bulan)</h3>
+        <h3>TID dengan Kendala Berulang yang melewati SLA (&gt;2 kali dalam 1 bulan)</h3>
         {frequentTids.length === 0 ? (
           <p className="text-muted">Tidak ada TID yang mengalami kendala lebih dari 2 kali dalam satu bulan.</p>
         ) : (
@@ -850,6 +1196,10 @@ export default function AdminDashboard() {
                       if (isSelected) {
                         setSelectedTidData(null)
                       } else {
+                        // Debug the orders being passed to generateDailyData
+                        console.log(`TID ${tidData.tid} orders:`, tidData.orders)
+                        console.log(`TID ${tidData.tid} breakdown:`, tidData.stateBreakdown)
+
                         const dailyData = generateDailyData(tidData.orders, tidData.monthKey)
                         setSelectedTidData({
                           tid: tidData.tid,
@@ -878,6 +1228,12 @@ export default function AdminDashboard() {
                       style={{ fontSize: "1.25rem", fontWeight: "700", color: "var(--danger)", marginTop: "0.5rem" }}
                     >
                       {tidData.count} kejadian
+                    </div>
+                    <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginTop: "0.25rem" }}>
+                      <span style={{ display: "inline-block", marginRight: "0.5rem" }}>
+                        Melewati SLA: {tidData.stateBreakdown.overdue}
+                      </span>
+                      <span>Selesai Terlambat: {tidData.stateBreakdown.completed_but_overdue}</span>
                     </div>
                     <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
                       {isSelected ? "Klik untuk tutup grafik" : "Klik untuk lihat grafik"}
@@ -926,7 +1282,7 @@ export default function AdminDashboard() {
             <option value="pending">Proses</option>
             <option value="completed">Selesai</option>
             <option value="overdue">Melewati Deadline</option>
-            <option value="completed but overdue">Selesai Terlambat</option>
+            <option value="completed_but_overdue">Selesai Terlambat</option>
           </select>
         </div>
 
@@ -938,7 +1294,9 @@ export default function AdminDashboard() {
           <select className="filter-select" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}>
             <option value="all">Semua Bulan</option>
             {monthNames.map((month, index) => (
-              <option key={index} value={index}>{month} {currentYear}</option>
+              <option key={index} value={index}>
+                {month} {currentYear}
+              </option>
             ))}
           </select>
         </div>
@@ -979,12 +1337,50 @@ export default function AdminDashboard() {
         </div>
       </div>
 
+      {/* Batch Delete Controls */}
+      {selectedOrders.size > 0 && (
+        <div className="card" style={{ marginBottom: "1rem", backgroundColor: "var(--bg-accent)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <h4 style={{ margin: 0, color: "var(--text-primary)" }}>{selectedOrders.size} kendala dipilih</h4>
+              <p style={{ margin: "0.25rem 0 0 0", fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+                Klik tombol hapus untuk menghapus semua kendala yang dipilih
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: "1rem" }}>
+              <button
+                onClick={() => setSelectedOrders(new Set())}
+                className="secondary"
+                style={{ fontSize: "0.875rem", padding: "0.5rem 1rem" }}
+              >
+                Batal Pilih
+              </button>
+              <button
+                onClick={handleBatchDelete}
+                className="danger"
+                disabled={isDeleting}
+                style={{ fontSize: "0.875rem", padding: "0.5rem 1rem" }}
+              >
+                {isDeleting ? "Menghapus..." : `Hapus ${selectedOrders.size} Kendala`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <div className="table-container">
           <table>
             <thead>
               <tr>
-                <th>ID</th>
+                <th style={{ width: "40px" }}>
+                  <input
+                    type="checkbox"
+                    checked={currentPageOrders.length > 0 && selectedOrders.size === currentPageOrders.length}
+                    onChange={handleSelectAll}
+                    style={{ cursor: "pointer" }}
+                  />
+                </th>
                 <th>TID</th>
                 <th>Lokasi</th>
                 <th>KC Supervisi</th>
@@ -994,18 +1390,25 @@ export default function AdminDashboard() {
                 <th>Status</th>
                 <th>Dibuat</th>
                 <th>Hasil Submit</th>
+                <th>Info Foto</th>
                 <th>Diselesaikan</th>
-                <th>Deadline</th>
+                <th>Waktu SLA</th>
                 <th>Tindakan</th>
               </tr>
             </thead>
             <tbody>
               {currentPageOrders.map((order) => {
-                const isOverdue = order.state === "overdue" || isCompletedButOverdue(order.state)
+                const isOverdue = isAnyOverdue(order)
+                const isSelected = selectedOrders.has(order.id)
                 return (
                   <tr key={order.id} className={isOverdue ? "overdue" : ""}>
                     <td>
-                      <strong>#{order.id}</strong>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleOrderSelect(order.id)}
+                        style={{ cursor: "pointer" }}
+                      />
                     </td>
                     <td>{order.reference_data?.tid || "—"}</td>
                     <td style={{ maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -1018,15 +1421,18 @@ export default function AdminDashboard() {
                       {order.description}
                     </td>
                     <td>
-                      <span className={`order-status status-${order.state.toLowerCase()}`}>
+                      <span className={`order-status status-${normalizeState(order.state)}`}>
                         {translateStatus(order.state)}
                       </span>
                     </td>
                     <td className="date-cell">
-                      {new Date(order.created_at).toLocaleString(undefined, {
+                      {new Date(order.created_at).toLocaleDateString(undefined, {
                         year: "numeric",
                         month: "short",
                         day: "numeric",
+                      })}
+                      ,<br />
+                      {new Date(order.created_at).toLocaleTimeString(undefined, {
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
@@ -1035,6 +1441,15 @@ export default function AdminDashboard() {
                       {order.image_url ? (
                         <a href={order.image_url} target="_blank" rel="noreferrer">
                           Lihat File
+                        </a>
+                      ) : (
+                        <span className="text-muted">Kosong</span>
+                      )}
+                    </td>
+                    <td>
+                      {order.image_url_new ? (
+                        <a href={order.image_url_new} target="_blank" rel="noreferrer">
+                          Lihat Foto
                         </a>
                       ) : (
                         <span className="text-muted">Kosong</span>
@@ -1053,39 +1468,48 @@ export default function AdminDashboard() {
                         <span className="text-muted">—</span>
                       )}
                     </td>
-                    <td>
+                    <td className="sla-cell">
                       {order.overdue_duration ||
                         (() => {
-                          if (order.state === "completed") {
-                            const createdAt = new Date(order.created_at)
-                            const deadline = new Date(createdAt.getTime() + 2 * 60 * 60 * 1000)
+                          const createdAt = new Date(order.created_at)
+                          const deadline = new Date(createdAt.getTime() + 2 * 60 * 60 * 1000)
+
+                          if (normalizeState(order.state) === "completed") {
                             const completedAt = new Date(order.completed_at)
-                            return completedAt <= deadline ? "Sesuai deadline" : "Melewati deadline"
-                          } else if (order.state === "pending") {
-                            const createdAt = new Date(order.created_at)
-                            const deadline = new Date(createdAt.getTime() + 2 * 60 * 60 * 1000)
-                            const now = new Date()
-                            const diff = deadline - now
+                            return completedAt <= deadline ? "Sesuai SLA" : "Melewati SLA"
+                          }
+
+                          const now = new Date()
+                          const diff = deadline - now
+
+                          const formatTime = (prefix, hours, minutes) => (
+                            <>
+                              <span>{`${prefix} ${hours} jam`}</span>
+                              <br />
+                              <span>{`${minutes} menit`}</span>
+                            </>
+                          )
+
+                          if (normalizeState(order.state) === "pending") {
                             if (diff > 0) {
                               const hours = Math.floor(diff / (1000 * 60 * 60))
                               const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
-                              return `sisa ${hours} jam ${minutes} menit`
+                              return formatTime("sisa", hours, minutes)
                             } else {
                               const overdueMillis = Math.abs(diff)
                               const hours = Math.floor(overdueMillis / (1000 * 60 * 60))
                               const minutes = Math.floor((overdueMillis % (1000 * 60 * 60)) / (1000 * 60))
-                              return `lewat ${hours} jam ${minutes} menit`
+                              return formatTime("lewat", hours, minutes)
                             }
-                          } else if (order.state === "overdue") {
-                            const createdAt = new Date(order.created_at)
-                            const deadline = new Date(createdAt.getTime() + 2 * 60 * 60 * 1000)
-                            const now = new Date()
-                            const diff = deadline - now
+                          }
+
+                          if (normalizeState(order.state) === "overdue") {
                             const overdueMillis = Math.abs(diff)
                             const hours = Math.floor(overdueMillis / (1000 * 60 * 60))
                             const minutes = Math.floor((overdueMillis % (1000 * 60 * 60)) / (1000 * 60))
-                            return `lewat ${hours} jam ${minutes} menit`
+                            return formatTime("lewat", hours, minutes)
                           }
+
                           return "—"
                         })()}
                     </td>

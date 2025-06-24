@@ -11,7 +11,7 @@ app = FastAPI()
 @app.on_event("startup")
 def start_scheduler():
     scheduler = BackgroundScheduler()
-    scheduler.add_job(lambda: tasks.check_and_flag_overdue_orders(next(auth.get_db())), 'interval', minutes=5)
+    scheduler.add_job(lambda: tasks.check_and_flag_overdue_orders(next(auth.get_db())), 'interval', minutes=5, misfire_grace_time=60)
     scheduler.start()
     
 app.add_middleware(

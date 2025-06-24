@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Enum
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Enum, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .database import Base
@@ -45,11 +45,13 @@ class Order(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
     image_url = Column(String, nullable=True)
+    image_url_new = Column(String, nullable=True)
 
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     user = relationship("User", back_populates="orders")
     reference_id = Column(Integer, ForeignKey("reference_data.id"), nullable=True)
     reference_data = relationship("ReferenceData", back_populates="orders")
+    warning_sent = Column(Boolean, default=False)
 
 # In User model (also in models.py)
 User.orders = relationship("Order", back_populates="user")

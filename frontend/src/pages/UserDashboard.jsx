@@ -13,11 +13,21 @@ export default function UserDashboard() {
   const [sortBy, setSortBy] = useState("newest")
   const [dateFilter, setDateFilter] = useState("all")
 
-  const currentYear = new Date().getFullYear();
+  const currentYear = new Date().getFullYear()
   const monthNames = [
-    "Januari", "Februari", "Maret", "April", "Mei", "Juni",
-    "Juli", "Agustus", "September", "Oktober", "November", "Desember"
-  ];
+    "Januari",
+    "Februari",
+    "Maret",
+    "April",
+    "Mei",
+    "Juni",
+    "Juli",
+    "Agustus",
+    "September",
+    "Oktober",
+    "November",
+    "Desember",
+  ]
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1)
@@ -41,7 +51,7 @@ export default function UserDashboard() {
         const orderDate = new Date(order.created_at)
         const orderYear = orderDate.getFullYear()
         const orderMonth = orderDate.getMonth() // 0-11
-        const currentYear = new Date().getFullYear();
+        const currentYear = new Date().getFullYear()
 
         // Only show orders from this year
         if (orderYear === currentYear) {
@@ -342,7 +352,9 @@ export default function UserDashboard() {
           <select className="filter-select" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}>
             <option value="all">Semua Bulan</option>
             {monthNames.map((month, index) => (
-              <option key={index} value={index}>{month} {currentYear}</option>
+              <option key={index} value={index}>
+                {month} {currentYear}
+              </option>
             ))}
           </select>
         </div>
@@ -458,7 +470,18 @@ export default function UserDashboard() {
                       <br />
                       {order.image_url ? (
                         <a href={order.image_url} target="_blank" rel="noreferrer">
-                          View File
+                          Lihat File
+                        </a>
+                      ) : (
+                        <span className="text-muted">Kosong</span>
+                      )}
+                    </div>
+                    <div>
+                      <strong>Info Foto:</strong>
+                      <br />
+                      {order.image_url_new ? (
+                        <a href={order.image_url_new} target="_blank" rel="noreferrer">
+                          Lihat Foto
                         </a>
                       ) : (
                         <span className="text-muted">Kosong</span>

@@ -22,3 +22,6 @@ env/
 
 # Google service account JSON (if not using env var)
 *.json
+
+# But NOT this one:
+!package.json

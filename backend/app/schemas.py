@@ -46,6 +46,7 @@ class OrderOut(OrderBase):
     created_at: datetime
     completed_at: Optional[datetime] = None
     image_url: Optional[str] = None
+    image_url_new : Optional[str] = None
     user_id: int
     username: Optional[str] = None 
     overdue_duration: Optional[str] = None

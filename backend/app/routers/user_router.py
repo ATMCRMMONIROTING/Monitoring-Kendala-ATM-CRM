@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
-from .. import models, schemas, auth, database, drive_utils
+from .. import models, schemas, auth, drive_utils
 from sqlalchemy.orm import Session
 from ..auth import get_current_user
 from ..schemas import UserOut
@@ -45,16 +45,6 @@ def get_my_orders(db: Session = Depends(auth.get_db), user=Depends(auth.get_curr
         if completed_at and completed_at.tzinfo is None:
             completed_at = WIB.localize(completed_at)
 
-        # Check and update overdue state if needed (only if not completed)
-        if not completed_at and order.state != models.OrderState.overdue:
-            deadline = created_at + overdue_limit
-            if now > deadline:
-                # Update the order state to OVERDUE
-                order.state = models.OrderState.overdue
-                db.add(order)
-                db.commit()
-                db.refresh(order)
-
         if completed_at:
             # Calculate total duration taken
             total_duration = completed_at - created_at
@@ -76,6 +66,7 @@ def get_my_orders(db: Session = Depends(auth.get_db), user=Depends(auth.get_curr
             created_at=created_at,
             completed_at=completed_at,
             image_url=order.image_url,
+            image_url_new=order.image_url_new,
             user_id=order.user_id,
             username=order.user.username,
             overdue_duration=overdue_by,

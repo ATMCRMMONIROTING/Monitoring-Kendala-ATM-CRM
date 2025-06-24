@@ -11,6 +11,7 @@ export default function CreateOrder() {
   const [userId, setUserId] = useState("")
   const [tid, setTid] = useState("")
   const [tidSearch, setTidSearch] = useState("")
+  const [file, setFile] = useState(null)
   const [users, setUsers] = useState([])
   const [referenceData, setReferenceData] = useState([])
   const [loading, setLoading] = useState(false)
@@ -23,7 +24,7 @@ export default function CreateOrder() {
     "SENTRALISASI CRO BG TASIKMALAYA": "BGTASIKMALAYA",
     "SENTRALISASI CRO BG SUKABUMI": "BGSUKABUMI",
     "SENTRALISASI CRO KEJAR BANDUNG": "KEJARBANDUNG",
-    "UKO": "UKO",
+    UKO: "UKO",
   }
 
   useEffect(() => {
@@ -65,8 +66,13 @@ export default function CreateOrder() {
     (ref) =>
       ref.tid.toLowerCase().includes(tidSearch.toLowerCase()) ||
       ref.lokasi.toLowerCase().includes(tidSearch.toLowerCase()) ||
-      ref.kc_supervisi.toLowerCase().includes(tidSearch.toLowerCase())
+      ref.kc_supervisi.toLowerCase().includes(tidSearch.toLowerCase()),
   )
+
+  const handleFileChange = (e) => {
+    const selectedFile = e.target.files[0]
+    setFile(selectedFile)
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -74,18 +80,28 @@ export default function CreateOrder() {
 
     setLoading(true)
     try {
-      await axios.post("/admin/orders", {
-        title,
-        description,
-        user_id: Number.parseInt(userId),
-        tid,
+      const formData = new FormData()
+      formData.append("title", title)
+      formData.append("description", description)
+      formData.append("user_id", userId)
+      formData.append("tid", tid)
+
+      if (file) {
+        formData.append("file", file)
+      }
+
+      await axios.post("/admin/orders", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
       })
+
       alert("Kendala berhasil dibuat")
       navigate("/admin")
     } catch (err) {
       if (err.response?.status === 401) logout()
       else if (err.response?.status === 404) alert("TID tidak ditemukan dalam reference data")
-      else alert("Kendala gagal dibuat")
+      else alert("Kendala gagal dibuat: " + (err.response?.data?.detail || err.message))
     } finally {
       setLoading(false)
     }
@@ -159,6 +175,35 @@ export default function CreateOrder() {
               ))}
             </select>
             <small>Pengelola akan otomatis dipilih berdasarkan TID → Pengelola</small>
+          </div>
+
+          <div className="form-group">
+            <label>Upload Gambar/File (Opsional)</label>
+            <div className={`file-upload ${file ? "has-file" : ""}`}>
+              <input type="file" accept="image/*" onChange={handleFileChange} />
+              <div className="file-upload-label">
+                {file ? (
+                  <div>
+                    <div style={{ fontWeight: "500", marginBottom: "0.25rem" }}>File dipilih: {file.name}</div>
+                    <div style={{ fontSize: "0.75rem", opacity: 0.8 }}>
+                      Ukuran: {(file.size / 1024 / 1024).toFixed(2)} MB
+                    </div>
+                    <div style={{ fontSize: "0.75rem", marginTop: "0.5rem" }}>Klik untuk mengganti file</div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ marginBottom: "0.5rem" }}>📁</div>
+                    <div>Klik untuk memilih file</div>
+                    <div style={{ fontSize: "0.75rem", marginTop: "0.25rem", opacity: 0.7 }}>
+                      Gambar baik berupa png atau jpg
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <small style={{ color: "#666", marginTop: "0.5rem", display: "block" }}>
+              File akan diupload ke Google Drive dan dapat diakses oleh pengelola
+            </small>
           </div>
 
           <div style={{ display: "flex", gap: "1rem" }}>
