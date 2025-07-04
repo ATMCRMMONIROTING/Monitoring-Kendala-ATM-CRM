@@ -47,6 +47,10 @@ class Order(Base):
     image_url = Column(String, nullable=True)
     image_url_new = Column(String, nullable=True)
 
+    nama_penulis = Column(String, nullable=True)
+    nomor_hp = Column(String, nullable=True)
+
+
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     user = relationship("User", back_populates="orders")
     reference_id = Column(Integer, ForeignKey("reference_data.id"), nullable=True)

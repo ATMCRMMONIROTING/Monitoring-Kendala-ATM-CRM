@@ -27,6 +27,8 @@ async def create_order(
     description: str = Form(...),
     user_id: int = Form(...),
     tid: Optional[str] = Form(None),
+    nama_penulis: Optional[str] = Form(None),
+    nomor_hp: Optional[str] = Form(None),  
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(auth.get_db),
     user=Depends(auth.get_current_user)
@@ -54,7 +56,9 @@ async def create_order(
         description=description,
         user_id=user_id,
         reference_id=ref.id,
-        image_url_new=file_url 
+        image_url_new=file_url,
+        nama_penulis=nama_penulis,
+        nomor_hp=nomor_hp  
     )
     db.add(new_order)
     db.commit()
@@ -102,6 +106,8 @@ def get_all_orders(db: Session = Depends(auth.get_db), user=Depends(auth.get_cur
             "overdue_duration": overdue_duration,
             "reference_id": o.reference_id,
             "reference_data": reference_data,
+            "nama_penulis": o.nama_penulis,
+            "nomor_hp": o.nomor_hp
             
         }
         result.append(order_dict)

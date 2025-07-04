@@ -51,8 +51,8 @@ def check_and_flag_overdue_orders(db: Session):
                 tanggal = escape_markdown_v2(dibuat_wib.strftime('%d-%m-%Y'))
                 
                 message = (
-                    f"*MELEWATI SLA FLM*\n\n"
-                    f"*Kendala dengan TID:* _{tid}_ di _{lokasi}_ telah *MELEWATI* SLA Penanganan Problem\\.\n"
+                    f"*SLA (OUT FLM)*\n\n"
+                    f"*Kendala dengan TID:* _{tid}_ di _{lokasi}_ telah *MELEWATI* SLA (OUT FLM)\\.\n"
                     f"*Pengelola:* _{pengelola}_\n"
                     f"*Kanca Supervisi:* _{kanca_supervisi}_\n"
                     f"*Waktu Kejadian:* {waktu} \\| {tanggal}\n\n"
@@ -83,8 +83,8 @@ def check_and_flag_overdue_orders(db: Session):
                 tanggal = escape_markdown_v2(dibuat_wib.strftime('%d-%m-%Y'))
                 
                 message = (
-                    f"*SLA WARNING*\n\n"
-                    f"*Kendala dengan TID:* _{tid}_ di _{lokasi}_ akan melewati SLA Penanganan Problem\\.\n"
+                    f"*SLA (IN FLM)*\n\n"
+                    f"*Kendala dengan TID:* _{tid}_ di _{lokasi}_ sudah melebihi 1 jam\\.\n"
                     f"*Pengelola:* _{pengelola}_\n"
                     f"*Kanca Supervisi:* _{kanca_supervisi}_\n"
                     f"*Waktu Kejadian:* {waktu} \\| {tanggal}\n\n"

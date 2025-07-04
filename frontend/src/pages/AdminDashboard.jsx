@@ -135,6 +135,8 @@ export default function AdminDashboard() {
       Pengelola: order.username,
       Judul: order.title,
       Deskripsi: order.description,
+      Nama_Penulis: order.nama_penulis || "—",
+      Nomor_HP: order.nomor_hp || "—",
       Status: translateStatus(order.state),
       Dibuat: new Date(order.created_at).toLocaleString(),
       Foto_Informasi: order.image_url_new ? order.image_url_new : "Kosong",
@@ -585,7 +587,9 @@ export default function AdminDashboard() {
         (order.reference_data?.pengelola || "")
           .toLowerCase()
           .replace(/\s+/g, "")
-          .includes(search.toLowerCase().replace(/\s+/g, ""))
+          .includes(search.toLowerCase().replace(/\s+/g, "")) ||
+        (order.nama_penulis || "").toLowerCase().includes(search.toLowerCase()) ||
+        (order.nomor_hp || "").toLowerCase().includes(search.toLowerCase())
 
       // Status filter
       const matchStatus = statusFilter === "all" || order.state === statusFilter
@@ -1329,7 +1333,7 @@ export default function AdminDashboard() {
           <input
             type="text"
             className="search-input"
-            placeholder="Cari judul, deskripsi, TID, lokasi, atau pengelola..."
+            placeholder="Cari judul, deskripsi, TID, lokasi, pengelola, nama penulis, atau nomor HP..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={{ flex: 1 }}
@@ -1387,6 +1391,8 @@ export default function AdminDashboard() {
                 <th>Pengelola</th>
                 <th>Judul</th>
                 <th>Deskripsi</th>
+                <th>Nama Penulis</th>
+                <th>Nomor HP</th>
                 <th>Status</th>
                 <th>Dibuat</th>
                 <th>Hasil Submit</th>
@@ -1420,6 +1426,8 @@ export default function AdminDashboard() {
                     <td style={{ maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {order.description}
                     </td>
+                    <td>{order.nama_penulis || "—"}</td>
+                    <td>{order.nomor_hp || "—"}</td>
                     <td>
                       <span className={`order-status status-${normalizeState(order.state)}`}>
                         {translateStatus(order.state)}

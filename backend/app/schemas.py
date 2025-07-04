@@ -27,6 +27,8 @@ class OrderBase(BaseModel):
 class OrderCreate(OrderBase):
     user_id: int
     tid: Optional[str] = None
+    nama_penulis: Optional[str] = None 
+    nomor_hp: Optional[str] = None 
     
 class ReferenceDataOut(BaseModel):
     id: int
@@ -52,6 +54,8 @@ class OrderOut(OrderBase):
     overdue_duration: Optional[str] = None
     reference_id: Optional[int]
     reference_data: Optional[ReferenceDataOut]
+    nama_penulis: Optional[str] = None
+    nomor_hp: Optional[str] = None
     
     class Config:
         orm_mode = True

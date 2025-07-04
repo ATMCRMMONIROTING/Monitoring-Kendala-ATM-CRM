@@ -11,6 +11,8 @@ export default function CreateOrder() {
   const [userId, setUserId] = useState("")
   const [tid, setTid] = useState("")
   const [tidSearch, setTidSearch] = useState("")
+  const [namaPenulis, setNamaPenulis] = useState("")
+  const [nomorHp, setNomorHp] = useState("")
   const [file, setFile] = useState(null)
   const [users, setUsers] = useState([])
   const [referenceData, setReferenceData] = useState([])
@@ -85,6 +87,14 @@ export default function CreateOrder() {
       formData.append("description", description)
       formData.append("user_id", userId)
       formData.append("tid", tid)
+
+      // Add the new fields to the form data
+      if (namaPenulis) {
+        formData.append("nama_penulis", namaPenulis)
+      }
+      if (nomorHp) {
+        formData.append("nomor_hp", nomorHp)
+      }
 
       if (file) {
         formData.append("file", file)
@@ -175,6 +185,28 @@ export default function CreateOrder() {
               ))}
             </select>
             <small>Pengelola akan otomatis dipilih berdasarkan TID → Pengelola</small>
+          </div>
+
+          <div className="form-group">
+            <label>Nama Penulis</label>
+            <input
+              type="text"
+              placeholder="Masukan nama penulis kendala (opsional)"
+              value={namaPenulis}
+              onChange={(e) => setNamaPenulis(e.target.value)}
+            />
+            <small style={{ color: "#666" }}>Nama orang yang melaporkan atau menulis kendala ini</small>
+          </div>
+
+          <div className="form-group">
+            <label>Nomor HP</label>
+            <input
+              type="tel"
+              placeholder="Masukan nomor HP (opsional)"
+              value={nomorHp}
+              onChange={(e) => setNomorHp(e.target.value)}
+            />
+            <small style={{ color: "#666" }}>Nomor HP yang dapat dihubungi terkait kendala ini</small>
           </div>
 
           <div className="form-group">
